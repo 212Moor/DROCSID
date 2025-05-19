@@ -2,6 +2,7 @@ import asyncio
 import re
 from collections import defaultdict
 from datetime import datetime
+import time
 
 class DROCSIDServer:
     def __init__(self):
@@ -18,56 +19,162 @@ class DROCSIDServer:
 
         try:
             while True:
-                data = await reader.readuntil(b'\n')
+                data = await asyncio.wait_for(reader.readuntil(b'\n'), timeout=5000)
                 cmd = data.decode().strip()
                 if not cmd:
                     continue
 
-                print(f"Commande reçue: {cmd}")  
+                if writer in self.users:
+                    self.users[writer] = (self.users[writer][0], time.time())
+
+                print(f"Commande reçue: {cmd}")
 
                 if cmd.startswith("LOGIN"):
-                    pseudo = cmd.split()[1]
-                    if not re.match(r'^[a-zA-Z0-9_-]{1,16}$', pseudo):
-                        writer.write(b"ERROR 20\n")
-                        print(f"Pseudo invalide: {pseudo}")
-                    elif pseudo in self.users.values():
-                        writer.write(b"ERROR 23\n")
-                        print(f"Pseudo déjà pris: {pseudo}")
-                    else:
-                        self.users[writer] = pseudo
-                        writer.write(b"OKAY!\n")
-                        print(f"Utilisateur connecté: {pseudo}")
-
+                    await self.handle_login(writer, cmd)
                 elif cmd.startswith("CREAT"):
-                    group = cmd.split()[1]
-                    if group in self.groups:
-                        writer.write(b"ERROR 33\n")
-                        print(f"Groupe existe déjà: {group}")
-                    else:
-                        self.groups[group] = {}
-                        writer.write(b"OKAY!\n")
-                        print(f"Groupe créé: {group}")
+                    await self.handle_creat(writer, cmd)
+                elif cmd.startswith("ENTER"):
+                    await self.handle_enter(writer, cmd)
+                elif cmd.startswith("SPEAK"):
+                    await self.handle_speak(reader, writer, cmd)
+                elif cmd == "ALIVE":
+                    writer.write(b"ALIVE\n")
+                else:
+                    writer.write(b"ERROR 11\n")
 
-
-        except (asyncio.IncompleteReadError, ConnectionResetError) as e:
+        except (asyncio.IncompleteReadError, ConnectionResetError, asyncio.TimeoutError) as e:
             print(f"Client déconnecté: {addr} ({e})")
         finally:
-            self.cleanup_client(writer)
+            await self.cleanup_client(writer)
             print(f"Connexion fermée: {addr}")
 
-    def cleanup_client(self, writer):
-        pseudo = self.users.pop(writer, None)
-        if pseudo:
-            for group in self.groups.values():
-                group.pop(pseudo, None)
+    async def handle_login(self, writer, cmd):
+        try:
+            pseudo = cmd.split()[1]
+            if not re.match(r'^[a-zA-Z0-9_-]{1,16}$', pseudo):
+                writer.write(b"ERROR 20\n")
+                print(f"Pseudo invalide: {pseudo}")
+            elif pseudo in [p for p, _ in self.users.values()]:
+                writer.write(b"ERROR 23\n")
+                print(f"Pseudo déjà pris: {pseudo}")
+            else:
+                self.users[writer] = (pseudo, time.time())
+                writer.write(b"OKAY!\n")
+                print(f"Utilisateur connecté: {pseudo}")
+        except IndexError:
+            writer.write(b"ERROR 10\n")
+
+    async def handle_creat(self, writer, cmd):
+        try:
+            group = cmd.split()[1]
+            if not re.match(r'^[a-zA-Z0-9_-]{1,16}$', group):
+                writer.write(b"ERROR 30\n")
+            elif group in self.groups:
+                writer.write(b"ERROR 33\n")
+            else:
+                self.groups[group] = {}
+                writer.write(b"OKAY!\n")
+                print(f"Groupe créé: {group}")
+        except IndexError:
+            writer.write(b"ERROR 10\n")
+
+    async def handle_enter(self, writer, cmd):
+        try:
+            group = cmd.split()[1]
+            if group not in self.groups:
+                writer.write(b"ERROR 31\n")
+            elif writer not in self.users:
+                writer.write(b"ERROR 01\n")
+            else:
+                pseudo = self.users[writer][0]
+                if pseudo in self.groups[group]:
+                    writer.write(b"ERROR 35\n")
+                else:
+                    self.groups[group][pseudo] = writer
+                    writer.write(b"OKAY!\n")
+                    ts = int(datetime.now().timestamp())
+                    msg = f"ENTER {group} {pseudo} {ts}\n"
+                    await self.broadcast(group, msg, exclude=writer)
+                    print(f"{pseudo} a rejoint {group}")
+        except IndexError:
+            writer.write(b"ERROR 10\n")
+
+    async def handle_speak(self, reader, writer, cmd):
+        try:
+            group = cmd.split()[1]
+            if group not in self.groups:
+                writer.write(b"ERROR 31\n")
+                return
+            
+            pseudo = self.users[writer][0]
+            if pseudo not in self.groups[group]:
+                writer.write(b"ERROR 34\n")
+                return
+
+            message = await self.read_multiline(reader)
+            if not message.strip():
+                writer.write(b"ERROR 10\n")
+                return
+
+            ts = int(datetime.now().timestamp())
+            broadcast_msg = f"SPEAK {pseudo} {group} {ts}\n{message}\n.\n"
+            await self.broadcast(group, broadcast_msg)
+            print(f"Message diffusé dans {group} par {pseudo}")
+
+        except IndexError:
+            writer.write(b"ERROR 10\n")
+
+    async def read_multiline(self, reader):
+        lines = []
+        while True:
+            line = (await reader.readuntil(b'\n')).decode()
+            if line.strip() == '.':
+                break
+            lines.append(line)
+        return ''.join(lines)
+
+    async def broadcast(self, group, message, exclude=None):
+        if group not in self.groups:
+            return
+            
+        for pseudo, writer in self.groups[group].items():
+            if writer != exclude:
+                try:
+                    writer.write(message.encode())
+                    await writer.drain()  
+                except:
+                    await self.cleanup_client(writer)
+
+    async def cleanup_client(self, writer):
+        if writer in self.users:
+            pseudo = self.users[writer][0]
+            for group in list(self.groups.keys()):
+                if pseudo in self.groups[group]:
+                    del self.groups[group][pseudo]
+                    ts = int(datetime.now().timestamp())
+                    msg = f"LEAVE {group} {pseudo} {ts}\n"
+                    await self.broadcast(group, msg)
+            del self.users[writer]
             print(f"Utilisateur déconnecté: {pseudo}")
         writer.close()
-        self.active_writers.remove(writer)
+        self.active_writers.discard(writer)
+
+async def check_inactive(server):
+    while True:
+        await asyncio.sleep(5000)
+        current_time = time.time()
+        for writer in list(server.users.keys()):
+            _, last_active = server.users[writer]
+            if current_time - last_active > 5000:
+                writer.write(b"ALIVE\n")
+            if current_time - last_active > 10000:
+                await server.cleanup_client(writer)
 
 async def main():
     server = DROCSIDServer()
-    srv = await asyncio.start_server(server.handle_client, '127.0.0.1', 8888)
-    print("Serveur DROCSID démarré sur le port 8888")
+    asyncio.create_task(check_inactive(server))
+    srv = await asyncio.start_server(server.handle_client, '127.0.0.1', 8887)
+    print("Serveur DROCSID démarré sur le port 8887")
     async with srv:
         await srv.serve_forever()
 

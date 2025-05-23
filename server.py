@@ -12,41 +12,37 @@ class DROCSIDServer:
         print("Serveur DROCSID initialisé. En attente de connexions...")
 
     async def handle_client(self, reader, writer):
-        addr = writer.get_extra_info('peername')
+        addr = writer.get_extra_info('peername')         
         print(f"Nouvelle connexion depuis {addr}")
         self.active_writers.add(writer)
         writer.write(b"srv: TCHAT 1\n")
-
         try:
             while True:
-                data = await asyncio.wait_for(reader.readuntil(b'\n'), timeout=5000)
-                cmd = data.decode().strip()
-                if not cmd:
+                data = await asyncio.wait_for(reader.readuntil(b'\n'), timeout=5000)               
+                cmd = data.decode().strip()                        
+                if not cmd:                
                     continue
-
                 if writer in self.users:
-                    self.users[writer] = (self.users[writer][0], time.time())
-
+                    self.users[writer] = (self.users[writer][0], time.time())         
                 print(f"Commande reçue: {cmd}")
-
                 if cmd.startswith("LOGIN"):
-                    await self.handle_login(writer, cmd)
+                    await self.handle_login(writer, cmd)   
                 elif cmd.startswith("CREAT"):
-                    await self.handle_creat(writer, cmd)
-                elif cmd.startswith("ENTER"):
+                    await self.handle_creat(writer, cmd)        
+                elif cmd.startswith("ENTER"):           
                     await self.handle_enter(writer, cmd)
-                elif cmd.startswith("SPEAK"):
+                elif cmd.startswith("SPEAK"):                
                     await self.handle_speak(reader, writer, cmd)
-                elif cmd.startswith("LEAVE"):
+                elif cmd.startswith("LEAVE"):          
                     await self.handle_leave(writer, cmd)
-                elif cmd.startswith("LSMEM"):
-                    await self.handle_lsmem(writer, cmd)
+                elif cmd.startswith("LSMEM"):            
+                    await self.handle_lsmem(writer, cmd)                
                 elif cmd.startswith("MSGPV"):
-                    await self.handle_msgpv(reader, writer, cmd)
+                    await self.handle_msgpv(reader, writer, cmd)                      
                 elif cmd == "ALIVE":
                     writer.write(b"srv: ALIVE\n")
                 else:
-                    writer.write(b"srv: ERROR 11\n")
+                    writer.write(b"srv: ERROR 11\n") 
 
         except (asyncio.IncompleteReadError, ConnectionResetError, asyncio.TimeoutError) as e:
             print(f"Client déconnecté: {addr} ({e})")
@@ -71,18 +67,18 @@ class DROCSIDServer:
             writer.write(b"srv: ERROR 10\n")
 
     async def handle_creat(self, writer, cmd):
-        try:
+        try: 
             group = cmd.split()[1]
             if not re.match(r'^[a-zA-Z0-9_-]{1,16}$', group):
                 writer.write(b"srv: ERROR 30\n")
             elif group in self.groups:
-                writer.write(b"srv: ERROR 33\n")
+                writer.write(b"srv: ERROR 33\n") 
             else:
                 self.groups[group] = {}
                 writer.write(b"srv: OKAY!\n")
-                print(f"Groupe créé: {group}")
+                print(f"Groupe créé: {group}") 
         except IndexError:
-            writer.write(b"srv: ERROR 10\n")
+            writer.write(b"srv: ERROR 10\n") 
 
     async def handle_enter(self, writer, cmd):
         try:
@@ -108,25 +104,22 @@ class DROCSIDServer:
     async def handle_speak(self, reader, writer, cmd):
         try:
             group = cmd.split()[1]
-            if group not in self.groups:
+            if group not in self.groups:  
                 writer.write(b"srv: ERROR 31\n")
                 return
-            
-            pseudo = self.users[writer][0]
+            pseudo = self.users[writer][0]  
             if pseudo not in self.groups[group]:
-                writer.write(b"srv: ERROR 34\n")
-                return
+                writer.write(b"srv: ERROR 34\n")  
+                return  
 
-            message = await self.read_multiline(reader)
+            message = await self.read_multiline(reader)  
             if not message.strip():
                 writer.write(b"srv: ERROR 10\n")
                 return
-
             ts = int(datetime.now().timestamp())
             broadcast_msg = f"srv: SPEAK {pseudo} {group} {ts}\n{message}\n.\n"
             await self.broadcast(group, broadcast_msg)
             print(f"Message diffusé dans {group} par {pseudo}")
-
         except IndexError:
             writer.write(b"srv: ERROR 10\n")
 
@@ -136,12 +129,10 @@ class DROCSIDServer:
             if group not in self.groups:
                 writer.write(b"srv: ERROR 31\n")
                 return
-                
             pseudo = self.users[writer][0]
             if pseudo not in self.groups[group]:
                 writer.write(b"srv: ERROR 34\n")
-                return
-                
+                return     
             del self.groups[group][pseudo]
             writer.write(b"srv: OKAY!\n")
             
@@ -149,7 +140,6 @@ class DROCSIDServer:
             notif = f"srv: LEAVE {group} {pseudo} {ts}\n"
             await self.broadcast(group, notif)
             print(f"{pseudo} a quitté {group}")
-            
         except IndexError:
             writer.write(b"srv: ERROR 10\n")
 
@@ -188,25 +178,20 @@ class DROCSIDServer:
                 if p == dest_pseudo:
                     target_writer = w
                     break
-                    
             if not target_writer:
                 writer.write(b"srv: ERROR 21\n")
                 return
-                
-            message = await self.read_multiline(reader)
+            message = await self.read_multiline(reader)  
             if not message.strip():
                 writer.write(b"srv: ERROR 10\n")
                 return
-                
             ts = int(datetime.now().timestamp())
             header = f"srv: MSGPV {sender_pseudo} {ts}\n"
             full_msg = header + message + "\n.\n"
-            
-            target_writer.write(full_msg.encode())
+            target_writer.write(full_msg.encode())  
             await target_writer.drain()
             writer.write(b"srv: OKAY!\n")
             print(f"Message privé de {sender_pseudo} à {dest_pseudo}")
-            
         except IndexError:
             writer.write(b"srv: ERROR 10\n")
         except Exception as e:
@@ -273,3 +258,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+    

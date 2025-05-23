@@ -8,36 +8,31 @@
 #include <vector>
 #include <ctime>
 #include <limits>
-
 using namespace std;
-
+   
 class DROCSIDClient {
 public:
     DROCSIDClient(const string& host, int port) : running(true), last_activity(time(nullptr)) {
-        sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) throw runtime_error("Échec création socket");
-
+        sock = socket(AF_INET, SOCK_STREAM, 0);   
+        if (sock < 0) throw runtime_error("echec création socket");
         sockaddr_in serv_addr{};
         serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(port);
-        
+        serv_addr.sin_port = htons(port);     
         if (inet_pton(AF_INET, host.c_str(), &serv_addr.sin_addr) <= 0)
-            throw runtime_error("Adresse invalide");
-
-        if (connect(sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
-            throw runtime_error("Échec connexion");
-
-        receiver_thread = thread(&DROCSIDClient::receive_messages, this);
-        keepalive_thread = thread(&DROCSIDClient::send_keepalive, this);
+            throw runtime_error("Adresse invalide ");
+        if (connect(sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)      
+            throw runtime_error("echec connexion" );
+        receiver_thread = thread(&DROCSIDClient::receive_messages, this);  
+        keepalive_thread = thread(&DROCSIDClient::send_keepalive, this);  
     }
 
     void login(const string& pseudo) {
-        send_command("LOGIN " + pseudo);
+        send_command("LOGIN " + pseudo);    
     }
-
-    void create_group(const string& group) {
-        send_command("CREAT " + group);
-    }
+ 
+    void create_group(const string& group) {   
+        send_command("CREAT " + group);  
+    }  
 
     void enter_group(const string& group) {
         send_command("ENTER " + group);
@@ -46,37 +41,37 @@ public:
     void leave_group(const string& group) {
         send_command("LEAVE " + group);
     }
-
+   
     void list_members(const string& group) {
-        send_command("LSMEM " + group);
+        send_command("LSMEM " + group);  
     }
-
-    void send_group_message(const string& group, const string& message) {
-        string full_cmd = "SPEAK " + group + "\n" + message + "\n.\n";
-        send_message(full_cmd);
-    }
+    
+    void send_group_message(const string& group, const string& message) {             
+        string full_cmd = "SPEAK " + group + "\n" + message + "\n.\n";               
+        send_message(full_cmd);      
+    }         
 
     void send_private_message(const string& pseudo, const string& message) {
         string full_cmd = "MSGPV " + pseudo + "\n" + message + "\n.\n";
         send_message(full_cmd);
     }
 
-    ~DROCSIDClient() {
+    ~DROCSIDClient() {   
         running = false;
-        close(sock);
+        close(sock);   
         if (receiver_thread.joinable()) receiver_thread.join();
         if (keepalive_thread.joinable()) keepalive_thread.join();
-    }
+    }   
 
 private:
     int sock;
-    atomic<bool> running;
-    thread receiver_thread;
+    atomic<bool> running;   
+    thread receiver_thread;  
     thread keepalive_thread;
-    time_t last_activity;
+    time_t last_activity;  
 
     void send_command(const string& cmd) {
-        string full_cmd = cmd + "\n";
+        string full_cmd = cmd + "\n"; 
         send_message(full_cmd);
     }
 
@@ -88,17 +83,14 @@ private:
     void receive_messages() {
         char buffer[4096];
         string remaining;
-
         while (running) {
             int bytes = recv(sock, buffer, sizeof(buffer)-1, 0);
             if (bytes <= 0) {
-                cerr << "Serveur déconnecté" << endl;
-                break;
+                cerr << "\nServeur déconnecté" << endl;
+                exit(1);
             }
-
             buffer[bytes] = '\0';
             remaining += buffer;
-
             size_t pos;
             while ((pos = remaining.find('\n')) != string::npos) {
                 string line = remaining.substr(0, pos);
@@ -106,7 +98,7 @@ private:
                 
                 if (!line.empty()) {
                     if (line == "srv: ALIVE") {
-                        send(sock, "ALIVE\n", 6, 0); // Réponse keepalive
+                        send(sock, "ALIVE\n", 6, 0);
                     } else {
                         cout << ">> " << line << endl;
                         if (line == ".") cout << "--- Fin du message ---" << endl;
@@ -114,7 +106,9 @@ private:
                 }
             }
         }
-    }
+    } 
+
+
 
     void send_keepalive() {
         while (running) {
@@ -131,25 +125,28 @@ void clear_input() {
     cin.ignore(numeric_limits<streamsize>::max(), '\n');
 }
 
+
 void show_main_menu() {
     cout << "\n=== MENU PRINCIPAL ===\n"
-         << "1. Créer un groupe\n"
+         << "1. Créer un groupe\n" 
          << "2. Rejoindre un groupe\n"
          << "3. Envoyer message privé\n"
-         << "4. Lister membres groupe\n"
+         << "4. Lister membres groupe\n" 
          << "5. Quitter un groupe\n"
-         << "6. Envoyer message groupe\n"
-         << "0. Quitter\n"
-         << "Votre choix : ";
-}
+         << "6. Envoyer message groupe\n"      
+         << "0. Quitter\n"  
+         << "Votre choix : ";   
 
-void show_group_menu(const string& group_name) {
-    cout << "\n=== MENU GROUPE [" << group_name << "] ===\n"
-         << "1. Envoyer message\n"
-         << "2. Lister membres\n"
-         << "3. Quitter groupe\n"
-         << "0. Retour menu principal\n"
-         << "Votre choix : ";
+}
+    
+
+void show_group_menu(const string& group_name) {   
+    cout << "\n=== MENU GROUPE [" << group_name << "] ===\n"  
+         << "1. Envoyer message\n"    
+         << "2. Lister membres\n"  
+         << "3. Quitter groupe\n"  
+         << "0. Retour menu  principal\n"
+         << "Votre choix  : ";
 }
 
 string read_multiline_message() {
@@ -157,7 +154,7 @@ string read_multiline_message() {
     cout << "Entrez votre message (finir par '.' seul):\n";
     while (getline(cin, line) && line != ".") {
         message += line + "\n";
-    }
+    }  
     return message;
 }
 
@@ -165,13 +162,15 @@ void handle_group_operations(DROCSIDClient& client, const string& group) {
     int choice;
     do {
         show_group_menu(group);
-        cin >> choice;
+        while (!(cin >> choice)) {
+            cout << "Entree invalide. Reessayez: ";
+            clear_input();
+        }
         clear_input();
-        
         switch(choice) {
             case 1:
-                client.send_group_message(group, read_multiline_message());
-                break;
+                client.send_group_message(group, read_multiline_message());  
+                break;  
             case 2:
                 client.list_members(group);
                 break;
@@ -181,7 +180,7 @@ void handle_group_operations(DROCSIDClient& client, const string& group) {
             case 0:
                 return;
             default:
-                cout << "Choix invalide!\n";
+                cout << "Choix invalide!\n";      
         }
     } while (true);
 }
@@ -189,67 +188,69 @@ void handle_group_operations(DROCSIDClient& client, const string& group) {
 int main() {
     try {
         cout << "=== CLIENT DROCSID ===" << endl;
-        DROCSIDClient client("127.0.0.1", 8888);
-
-        // Authentification
+        cout << "Connexion au serveur..." << endl;
+        
+        DROCSIDClient client("37.187.122.178", 1312); //IP Server pablo.rauzy.name
+        
         string pseudo;
         cout << "Entrez votre pseudo : ";
         getline(cin, pseudo);
         client.login(pseudo);
-
+        this_thread::sleep_for(chrono::milliseconds(500));
         // Menu principal
         int choice;
         string input;
-        
         do {
             show_main_menu();
-            cin >> choice;
+            while (!(cin >> choice)) {
+                cout << "Entrée invalide.  Réessayez: "; 
+                clear_input();  
+            }
             clear_input();
-            
             switch(choice) {
                 case 1: {
-                    cout << "Nom du groupe : ";
+                    cout << "Nom du  groupe  : ";   
                     getline(cin, input);
-                    client.create_group(input);
-                    break;
+                    client.create_group(input);      
+                    break;  
                 }
                 case 2: {
-                    cout << "Nom du groupe : ";
-                    getline(cin, input);
+                    cout << "Nom du groupe  : ";
+                    getline(cin,  input);
                     client.enter_group(input);
                     handle_group_operations(client, input);
                     break;
                 }
                 case 3: {
                     string dest, msg;
-                    cout << "Destinataire : ";
-                    getline(cin, dest);
+                    cout << "Destinataire :  ";
+                    getline(cin, dest);  
                     msg = read_multiline_message();
-                    client.send_private_message(dest, msg);
+                    client.send_private_message(dest, msg);   
                     break;
                 }
                 case 4: {
-                    cout << "Nom du groupe : ";
+                    cout << "Nom du groupe : ";   
                     getline(cin, input);
                     client.list_members(input);
-                    break;
+                    break;  
                 }
-                case 5: {
+                case 5: {  
                     cout << "Nom du groupe : ";
-                    getline(cin, input);
+                    getline(cin, input);  
                     client.leave_group(input);
                     break;
                 }
-                case 6: {
-                    cout << "Nom du groupe : ";
+                case 6: { 
+                    cout << "Nom du groupe : ";  
                     getline(cin, input);
                     client.send_group_message(input, read_multiline_message());
                     break;
-                }
+                }  
                 case 0:
-                    cout << "Déconnexion..." << endl;
-                    break;
-                default:
+                    cout << "Déconnexion...." << endl;   
+                    break; 
+                default:  
                     cout << "Option invalide!" << endl;
             }
         } while (choice != 0);
@@ -258,5 +259,7 @@ int main() {
         cerr << "ERREUR : " << e.what() << endl;
         return 1;
     }
-    return 0;
+    return 0;  
 }
+
+

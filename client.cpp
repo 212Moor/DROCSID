@@ -7,6 +7,7 @@
 #include <atomic>
 #include <vector>
 #include <ctime>
+#include <limits>
 
 using namespace std;
 
@@ -14,17 +15,17 @@ class DROCSIDClient {
 public:
     DROCSIDClient(const string& host, int port) : running(true), last_activity(time(nullptr)) {
         sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) throw runtime_error("Socket creation failed");
+        if (sock < 0) throw runtime_error("Échec création socket");
 
         sockaddr_in serv_addr{};
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(port);
         
         if (inet_pton(AF_INET, host.c_str(), &serv_addr.sin_addr) <= 0)
-            throw runtime_error("Invalid address");
+            throw runtime_error("Adresse invalide");
 
         if (connect(sock, (sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
-            throw runtime_error("Connection failed");
+            throw runtime_error("Échec connexion");
 
         receiver_thread = thread(&DROCSIDClient::receive_messages, this);
         keepalive_thread = thread(&DROCSIDClient::send_keepalive, this);
@@ -91,7 +92,7 @@ private:
         while (running) {
             int bytes = recv(sock, buffer, sizeof(buffer)-1, 0);
             if (bytes <= 0) {
-                cerr << "Server disconnected" << endl;
+                cerr << "Serveur déconnecté" << endl;
                 break;
             }
 
@@ -104,8 +105,12 @@ private:
                 remaining.erase(0, pos+1);
                 
                 if (!line.empty()) {
-                    cout << ">> " << line << endl;
-                    if (line == ".") cout << "--- End of message ---" << endl;
+                    if (line == "srv: ALIVE") {
+                        send(sock, "ALIVE\n", 6, 0); // Réponse keepalive
+                    } else {
+                        cout << ">> " << line << endl;
+                        if (line == ".") cout << "--- Fin du message ---" << endl;
+                    }
                 }
             }
         }
@@ -121,72 +126,136 @@ private:
     }
 };
 
-void show_help() {
-    cout << "Commandes disponibles:\n"
-         << "  login <pseudo>\n"
-         << "  create <groupe>\n"
-         << "  enter <groupe>\n"
-         << "  leave <groupe>\n"
-         << "  speak <groupe> <message>\n"
-         << "  private <pseudo> <message>\n"
-         << "  members <groupe>\n"
-         << "  exit\n";
+void clear_input() {
+    cin.clear();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
 }
 
-void process_command(DROCSIDClient& client, const string& cmd) {
-    if (cmd.empty()) return;
+void show_main_menu() {
+    cout << "\n=== MENU PRINCIPAL ===\n"
+         << "1. Créer un groupe\n"
+         << "2. Rejoindre un groupe\n"
+         << "3. Envoyer message privé\n"
+         << "4. Lister membres groupe\n"
+         << "5. Quitter un groupe\n"
+         << "6. Envoyer message groupe\n"
+         << "0. Quitter\n"
+         << "Votre choix : ";
+}
 
-    size_t space_pos = cmd.find(' ');
-    string action = (space_pos == string::npos) ? cmd : cmd.substr(0, space_pos);
+void show_group_menu(const string& group_name) {
+    cout << "\n=== MENU GROUPE [" << group_name << "] ===\n"
+         << "1. Envoyer message\n"
+         << "2. Lister membres\n"
+         << "3. Quitter groupe\n"
+         << "0. Retour menu principal\n"
+         << "Votre choix : ";
+}
 
-    if (action == "login" && space_pos != string::npos) {
-        client.login(cmd.substr(space_pos + 1));
-    } else if (action == "create" && space_pos != string::npos) {
-        client.create_group(cmd.substr(space_pos + 1));
-    } else if (action == "enter" && space_pos != string::npos) {
-        client.enter_group(cmd.substr(space_pos + 1));
-    } else if (action == "leave" && space_pos != string::npos) {
-        client.leave_group(cmd.substr(space_pos + 1));
-    } else if (action == "members" && space_pos != string::npos) {
-        client.list_members(cmd.substr(space_pos + 1));
-    } else if (action == "speak" && space_pos != string::npos) {
-        size_t group_end = cmd.find(' ', space_pos + 1);
-        if (group_end != string::npos) {
-            string group = cmd.substr(space_pos + 1, group_end - space_pos - 1);
-            string message = cmd.substr(group_end + 1);
-            client.send_group_message(group, message);
-        }
-    } else if (action == "private" && space_pos != string::npos) {
-        size_t pseudo_end = cmd.find(' ', space_pos + 1);
-        if (pseudo_end != string::npos) {
-            string pseudo = cmd.substr(space_pos + 1, pseudo_end - space_pos - 1);
-            string message = cmd.substr(pseudo_end + 1);
-            client.send_private_message(pseudo, message);
-        }
-    } else if (action == "help") {
-        show_help();
-    } else if (action == "exit") {
-        return;
-    } else {
-        cout << "Commande invalide. Tapez 'help' pour l'aide." << endl;
+string read_multiline_message() {
+    string message, line;
+    cout << "Entrez votre message (finir par '.' seul):\n";
+    while (getline(cin, line) && line != ".") {
+        message += line + "\n";
     }
+    return message;
+}
+
+void handle_group_operations(DROCSIDClient& client, const string& group) {
+    int choice;
+    do {
+        show_group_menu(group);
+        cin >> choice;
+        clear_input();
+        
+        switch(choice) {
+            case 1:
+                client.send_group_message(group, read_multiline_message());
+                break;
+            case 2:
+                client.list_members(group);
+                break;
+            case 3:
+                client.leave_group(group);
+                return;
+            case 0:
+                return;
+            default:
+                cout << "Choix invalide!\n";
+        }
+    } while (true);
 }
 
 int main() {
     try {
-        cout << "Connexion au serveur..." << endl;
+        cout << "=== CLIENT DROCSID ===" << endl;
         DROCSIDClient client("127.0.0.1", 8888);
 
-        show_help();
-        string cmd;
-        while (true) {
-            cout << "> ";
-            getline(cin, cmd);
-            if (cmd == "exit") break;
-            process_command(client, cmd);
-        }
+        // Authentification
+        string pseudo;
+        cout << "Entrez votre pseudo : ";
+        getline(cin, pseudo);
+        client.login(pseudo);
+
+        // Menu principal
+        int choice;
+        string input;
+        
+        do {
+            show_main_menu();
+            cin >> choice;
+            clear_input();
+            
+            switch(choice) {
+                case 1: {
+                    cout << "Nom du groupe : ";
+                    getline(cin, input);
+                    client.create_group(input);
+                    break;
+                }
+                case 2: {
+                    cout << "Nom du groupe : ";
+                    getline(cin, input);
+                    client.enter_group(input);
+                    handle_group_operations(client, input);
+                    break;
+                }
+                case 3: {
+                    string dest, msg;
+                    cout << "Destinataire : ";
+                    getline(cin, dest);
+                    msg = read_multiline_message();
+                    client.send_private_message(dest, msg);
+                    break;
+                }
+                case 4: {
+                    cout << "Nom du groupe : ";
+                    getline(cin, input);
+                    client.list_members(input);
+                    break;
+                }
+                case 5: {
+                    cout << "Nom du groupe : ";
+                    getline(cin, input);
+                    client.leave_group(input);
+                    break;
+                }
+                case 6: {
+                    cout << "Nom du groupe : ";
+                    getline(cin, input);
+                    client.send_group_message(input, read_multiline_message());
+                    break;
+                }
+                case 0:
+                    cout << "Déconnexion..." << endl;
+                    break;
+                default:
+                    cout << "Option invalide!" << endl;
+            }
+        } while (choice != 0);
+
     } catch (const exception& e) {
-        cerr << "Erreur: " << e.what() << endl;
+        cerr << "ERREUR : " << e.what() << endl;
         return 1;
     }
     return 0;

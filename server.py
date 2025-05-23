@@ -250,17 +250,17 @@ class DROCSIDServer:
 
 async def check_inactive(server):
     while True:
-        await asyncio.sleep(15)
+        await asyncio.sleep(1800)
         current_time = time.time()
         for writer in list(server.users.keys()):
             _, last_active = server.users[writer]
-            if current_time - last_active > 15:
+            if current_time - last_active > 1800:
                 try:
                     writer.write(b"srv: ALIVE\n")
                     await writer.drain()
                 except:
                     await server.cleanup_client(writer)
-            if current_time - last_active > 30:
+            if current_time - last_active > 2700:
                 await server.cleanup_client(writer)
 
 async def main():
